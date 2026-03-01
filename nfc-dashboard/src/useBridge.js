@@ -38,11 +38,14 @@ export function useBridge(url = DEFAULT_URL) {
 
           // Handle pending request responses
           if (id && pendingRequests.current.has(id)) {
-            const { resolve } = pendingRequests.current.get(id);
+            const { resolve, reject } = pendingRequests.current.get(id);
             pendingRequests.current.delete(id);
-            // Update tag state from write/erase/lock/read responses
-            if (msg.tag) setTag(msg.tag);
-            resolve(msg);
+            if (event === "error") {
+              reject(new Error(msg.message || "Operation failed"));
+            } else {
+              if (msg.tag) setTag(msg.tag);
+              resolve(msg);
+            }
           }
 
           switch (event) {

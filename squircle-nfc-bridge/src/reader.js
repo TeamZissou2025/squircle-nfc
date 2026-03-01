@@ -6,11 +6,12 @@ import { NFC } from "nfc-pcsc";
 import { EventEmitter } from "node:events";
 import { parseNDEF } from "./ndef.js";
 
-// NTAG type identification by ATR or capacity
+// NTAG type identification by CC-reported capacity (CC byte 2 × 8)
+// NTAG213: CC=0x12 → 144B, NTAG215: CC=0x3E → 496B, NTAG216: CC=0x6D → 872B
 const NTAG_TYPES = {
-  137: "NTAG213",
+  144: "NTAG213",
   496: "NTAG215",
-  868: "NTAG216",
+  872: "NTAG216",
 };
 
 function identifyTagType(capacity) {
@@ -72,9 +73,8 @@ export class NFCReader extends EventEmitter {
   }
 
   async _readTagInfo(reader, card) {
-    // Read capability container (CC) at page 3
-    // nfc-pcsc reader.read() takes block/page number, not byte offset
-    const cc = await reader.read(3, 4);
+    // Read capability container (CC) at page 3 via raw APDU
+    const cc = await this._rawRead(reader, 3, 4);
     const capacityByte = cc[2];
     const totalBytes = capacityByte * 8;
     const writable = cc[3] === 0x00;
@@ -104,17 +104,16 @@ export class NFCReader extends EventEmitter {
   }
 
   async _readNDEFData(reader) {
-    // NDEF data starts at page 4 on NTAG chips
-    // nfc-pcsc reader.read() takes block/page number, not byte offset
+    // NDEF data starts at page 4 on NTAG chips.
+    // NTAG READ returns 4 pages (16 bytes) per command.
     const chunks = [];
     const startPage = 4;
-    const pagesPerRead = 4; // 4 pages × 4 bytes = 16 bytes per read
-    const bytesPerRead = 16;
+    const pagesPerRead = 4;
     const maxReads = 10; // up to 40 pages (160 bytes)
 
     for (let i = 0; i < maxReads; i++) {
       try {
-        const data = await reader.read(startPage + i * pagesPerRead, bytesPerRead);
+        const data = await this._rawRead(reader, startPage + i * pagesPerRead, 16);
         chunks.push(data);
       } catch {
         break;
@@ -230,23 +229,16 @@ export class NFCReader extends EventEmitter {
   // ─── NTAG page read via READ BINARY ─────────────────
 
   /**
-   * Read a single 4-byte page from the NTAG via READ BINARY.
-   * Uses the same raw pcsclite transmit approach as _writeNTAGPage
-   * to avoid nfc-pcsc's reader.card gate.
+   * Read via READ BINARY using raw pcsclite transmit (bypasses nfc-pcsc
+   * reader.card gate).  NTAG READ always returns 4 pages (16 bytes)
+   * regardless of Le, so we request 16 and slice to the desired length.
    *
-   * APDU: FF B0 00 <page> 04
-   *   FF    = CLA
-   *   B0    = INS (READ BINARY)
-   *   00    = P1
-   *   <page> = P2: NTAG page number
-   *   04    = Le (4 bytes expected)
-   *
-   * Response on success: <4 data bytes> 90 00
+   * @param {object} reader  - nfc-pcsc reader instance
+   * @param {number} page    - NTAG page number
+   * @param {number} length  - bytes to return (default 4 = single page)
    */
-  async _readNTAGPage(reader, page) {
-    const apdu = Buffer.from([0xFF, 0xB0, 0x00, page & 0xFF, 0x04]);
-
-    console.log(`  [read] page ${page}  apdu=${apdu.toString("hex")}`);
+  async _rawRead(reader, page, length = 4) {
+    const apdu = Buffer.from([0xFF, 0xB0, 0x00, page & 0xFF, 0x10]);
 
     if (!reader.connection) {
       console.log("  [read] PC/SC connection lost, reconnecting...");
@@ -259,7 +251,7 @@ export class NFCReader extends EventEmitter {
 
     const res = await new Promise((resolve, reject) => {
       rawReader.transmit(apdu, 64, protocol, (err, response) => {
-        if (err) return reject(new Error(`NTAG READ transmit error page ${page}: ${err.message}`));
+        if (err) return reject(new Error(`READ BINARY transmit error page ${page}: ${err.message}`));
         resolve(response);
       });
     });
@@ -268,13 +260,11 @@ export class NFCReader extends EventEmitter {
     const sw2 = res[res.length - 1];
     if (sw1 !== 0x90 || sw2 !== 0x00) {
       throw new Error(
-        `NTAG READ failed page ${page}: SW=${sw1.toString(16).padStart(2, "0")}${sw2.toString(16).padStart(2, "0")}`
+        `READ BINARY failed page ${page}: SW=${sw1.toString(16).padStart(2, "0")}${sw2.toString(16).padStart(2, "0")}`
       );
     }
 
-    const data = res.subarray(0, res.length - 2);
-    console.log(`  [read] page ${page}  data=${data.toString("hex")}`);
-    return data;
+    return res.subarray(0, Math.min(length, res.length - 2));
   }
 
   // ─── Public API ─────────────────────────────────────
@@ -364,41 +354,54 @@ export class NFCReader extends EventEmitter {
     const reader = this.reader;
     console.log("[lockTag] === PERMANENTLY LOCKING TAG ===");
 
-    // Step 1: Read CC at page 3 to determine tag type and set read-only
+    // Step 1: Read CC at page 3 to determine tag type
     console.log("[lockTag] Step 1: Reading CC at page 3...");
-    const cc = await this._readNTAGPage(reader, 3);
+    const cc = await this._rawRead(reader, 3, 4);
     const capacityByte = cc[2];
     const totalBytes = capacityByte * 8;
     const tagType = identifyTagType(totalBytes);
-    console.log(`[lockTag] Tag type: ${tagType}, capacity: ${totalBytes}B, CC before: ${cc.toString("hex")}`);
+    console.log(`[lockTag] Tag type: ${tagType}, capacity: ${totalBytes}B, CC=${cc.toString("hex")}`);
 
     // Step 2: Set CC access byte to 0x0F (read-only) and write back
     console.log("[lockTag] Step 2: Setting CC access byte to 0x0F (read-only)...");
-    const ccUpdated = Buffer.from(cc);
-    ccUpdated[3] = 0x0F;
-    console.log(`[lockTag] CC after: ${ccUpdated.toString("hex")}`);
+    const ccUpdated = Buffer.from([cc[0], cc[1], cc[2], 0x0F]);
     await this._writeNTAGPage(reader, 3, ccUpdated);
-    console.log("[lockTag] CC written to page 3");
 
-    // Step 3: Set static lock bytes at page 2 (bytes 2-3 = 0xFF 0xFF)
-    // Page 2 layout: SN2(byte0), Internal(byte1), Lock0(byte2), Lock1(byte3)
-    console.log("[lockTag] Step 3: Setting static lock bytes at page 2...");
-    const page2 = await this._readNTAGPage(reader, 2);
-    console.log(`[lockTag] Page 2 before: ${page2.toString("hex")}`);
-    const page2Updated = Buffer.from(page2);
-    page2Updated[2] = 0xFF; // Lock0: lock pages 3-7 + CC
-    page2Updated[3] = 0xFF; // Lock1: lock pages 8-15
-    console.log(`[lockTag] Page 2 after: ${page2Updated.toString("hex")}`);
-    await this._writeNTAGPage(reader, 2, page2Updated);
-    console.log("[lockTag] Static lock bytes written to page 2");
+    // Verify CC was written
+    const ccVerify = await this._rawRead(reader, 3, 4);
+    console.log(`[lockTag] CC verify: ${ccVerify.toString("hex")} (expect byte3=0f)`);
+    if (ccVerify[3] !== 0x0F) {
+      throw new Error(`CC write failed: expected access=0F, got=${ccVerify[3].toString(16)}`);
+    }
 
-    // Step 4: Set dynamic lock bytes based on tag type
+    // Step 3: Write dynamic lock bytes BEFORE static locks
+    // (static locks cover pages 3-15; dynamic lock pages are beyond that range
+    //  but we write them first as a precaution)
     // NTAG213: page 40, NTAG215: page 130, NTAG216: page 226
-    const dynamicLockPage = totalBytes <= 137 ? 40 : totalBytes <= 496 ? 130 : 226;
+    const dynamicLockPage = totalBytes <= 144 ? 40 : totalBytes <= 496 ? 130 : 226;
     const dynamicLockBits = Buffer.from([0xFF, 0xFF, 0xFF, 0x00]);
-    console.log(`[lockTag] Step 4: Writing dynamic lock bits to page ${dynamicLockPage}...`);
+    console.log(`[lockTag] Step 3: Writing dynamic lock bits to page ${dynamicLockPage}...`);
     await this._writeNTAGPage(reader, dynamicLockPage, dynamicLockBits);
-    console.log(`[lockTag] Dynamic lock bytes written to page ${dynamicLockPage}`);
+
+    // Verify dynamic lock bytes
+    const dlVerify = await this._rawRead(reader, dynamicLockPage, 4);
+    console.log(`[lockTag] Dynamic lock verify: ${dlVerify.toString("hex")} (expect ffffff00)`);
+
+    // Step 4: Set static lock bytes at page 2 (bytes 2-3 = 0xFF 0xFF)
+    // Page 2 layout: SN2(byte0), Internal(byte1), Lock0(byte2), Lock1(byte3)
+    // This is done LAST because it locks pages 3-15 permanently.
+    console.log("[lockTag] Step 4: Setting static lock bytes at page 2...");
+    const page2 = await this._rawRead(reader, 2, 4);
+    console.log(`[lockTag] Page 2 before: ${page2.toString("hex")}`);
+    const page2Updated = Buffer.from([page2[0], page2[1], 0xFF, 0xFF]);
+    await this._writeNTAGPage(reader, 2, page2Updated);
+
+    // Verify static lock bytes
+    const p2Verify = await this._rawRead(reader, 2, 4);
+    console.log(`[lockTag] Page 2 verify: ${p2Verify.toString("hex")} (expect bytes2-3=ffff)`);
+    if (p2Verify[2] !== 0xFF || p2Verify[3] !== 0xFF) {
+      throw new Error(`Static lock write failed: got Lock0=${p2Verify[2].toString(16)} Lock1=${p2Verify[3].toString(16)}`);
+    }
 
     console.log("[lockTag] === TAG PERMANENTLY LOCKED ===");
     return { success: true };

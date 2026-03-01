@@ -40,8 +40,10 @@ export function useBridge(url = DEFAULT_URL) {
           const msg = JSON.parse(e.data);
           const { event, id } = msg;
 
-          // Handle pending request responses
-          if (id && pendingRequests.current.has(id)) {
+          // Handle pending request responses (skip broadcast events whose id
+          // field is a history-entry ID that could collide with request IDs)
+          const isBroadcast = event === "history:entry" || event === "heartbeat";
+          if (id && !isBroadcast && pendingRequests.current.has(id)) {
             const { resolve, reject } = pendingRequests.current.get(id);
             pendingRequests.current.delete(id);
             if (event === "error") {

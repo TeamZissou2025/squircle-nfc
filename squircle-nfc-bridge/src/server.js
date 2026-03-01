@@ -74,7 +74,6 @@ export class BridgeServer {
     this.reader.on("tag:connect", (tag) => {
       this._lastTag = tag;
       this._broadcast("tag:connect", tag);
-      this._addHistory({ action: "detect", tag });
       this._log(`Tag detected: ${tag.uid} (${tag.type})`);
     });
 

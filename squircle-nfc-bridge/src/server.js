@@ -14,6 +14,7 @@ export class BridgeServer {
     this.wss = null;
     this.clients = new Set();
     this.history = [];
+    this._nextHistoryId = 1;
     this._heartbeatTimer = null;
   }
 
@@ -153,6 +154,25 @@ export class BridgeServer {
           break;
         }
 
+        case "clearHistory": {
+          this.history = [];
+          this._send(ws, "clearHistory:result", { id, success: true });
+          break;
+        }
+
+        case "labelHistory": {
+          const historyId = payload?.historyId;
+          const label = payload?.label ?? null;
+          const entry = this.history.find(h => h.id === historyId);
+          if (entry) {
+            entry.label = label;
+            this._send(ws, "labelHistory:result", { id, historyId, label });
+          } else {
+            this._send(ws, "error", { id, message: `History entry ${historyId} not found` });
+          }
+          break;
+        }
+
         case "ping": {
           this._send(ws, "pong", { id, timestamp: Date.now() });
           break;
@@ -183,17 +203,19 @@ export class BridgeServer {
   }
 
   _addHistory(entry) {
-    this.history.unshift({
-      id: this.history.length + 1,
+    const historyEntry = {
+      id: this._nextHistoryId++,
       uid: entry.tag?.uid,
       action: entry.action,
       tag_type: entry.tag?.type,
       records: entry.records || entry.tag?.records || [],
       created_at: new Date().toISOString(),
       label: null,
-    });
-    // Keep last 100 entries
+    };
+    this.history.unshift(historyEntry);
     if (this.history.length > 100) this.history.pop();
+    // Broadcast to all clients so they stay in sync
+    this._broadcast("history:entry", historyEntry);
   }
 
   _startHeartbeat() {

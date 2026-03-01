@@ -52,14 +52,6 @@ const STARTER_TEMPLATES = [
   { id: "t4", name: "Portfolio", type: "url", records: [{ type: "url", value: "https://portfolio.dev" }] },
 ];
 
-const MOCK_HISTORY = [
-  { id: 1, uid: "04:A2:FB:1A:3C:80:84", action: "read", records: [{ type: "url", value: "https://github.com/squircle" }], created_at: "2026-02-28T14:30:00Z", label: "DJ's GitHub" },
-  { id: 2, uid: "04:B7:CC:2D:4E:91:A3", action: "write", records: [{ type: "wifi", value: { ssid: "SelkirkGuest" } }], created_at: "2026-02-27T09:15:00Z", label: "Lab WiFi Tag" },
-  { id: 3, uid: "04:A2:FB:1A:3C:80:84", action: "write", records: [{ type: "vcard", value: { name: "DJ" } }], created_at: "2026-02-26T16:45:00Z", label: null },
-  { id: 4, uid: "04:D1:EE:5F:7A:B2:C8", action: "erase", records: [], created_at: "2026-02-25T11:00:00Z", label: "Old demo tag" },
-  { id: 5, uid: "04:F3:AA:8B:2C:D4:E6", action: "read", records: [{ type: "text", value: "Hello NFC World" }], created_at: "2026-02-24T13:20:00Z", label: null },
-];
-
 // ─── HELPERS ──────────────────────────────────────────────
 const F = "'Space Grotesk', sans-serif";
 const M = "'Space Mono', monospace";
@@ -296,10 +288,12 @@ export default function NFCDashboard() {
   const [activeTab, setActiveTab] = useState("history");
   const [showLockModal, setShowLockModal] = useState(false);
   const [writeRecord, setWriteRecord] = useState({ type: "url", value: "" });
-  const [history] = useState(MOCK_HISTORY);
   const [templates] = useState(STARTER_TEMPLATES);
   const [toast, setToast] = useState(null);
   const [opInProgress, setOpInProgress] = useState(null);
+  const [editingLabelId, setEditingLabelId] = useState(null);
+  const [labelDraft, setLabelDraft] = useState("");
+  const history = bridge.history;
 
   const showToast = useCallback((msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
 
@@ -405,17 +399,28 @@ export default function NFCDashboard() {
               {/* Sidebar - col 3, spans all rows */}
               <div style={{ ...card, gridColumn: 3, gridRow: "1 / -1", padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", animation: "popIn 0.4s ease 0.1s both" }}>
                 <div style={{ padding: "12px 14px 0", flexShrink: 0 }}>
-                  <div style={{ display: "flex", backgroundColor: "#f0ede8", borderRadius: 10, padding: 3 }}>
-                    {[["history", "History"], ["templates", "Templates"]].map(([id, label]) => (
-                      <button key={id} onClick={() => setActiveTab(id)} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: F, transition: "all 0.2s", backgroundColor: activeTab === id ? "#fff" : "transparent", color: activeTab === id ? "#1a1a1a" : "#9ca3af", boxShadow: activeTab === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
-                        {label}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ display: "flex", backgroundColor: "#f0ede8", borderRadius: 10, padding: 3, flex: 1 }}>
+                      {[["history", "History"], ["templates", "Templates"]].map(([id, label]) => (
+                        <button key={id} onClick={() => setActiveTab(id)} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: F, transition: "all 0.2s", backgroundColor: activeTab === id ? "#fff" : "transparent", color: activeTab === id ? "#1a1a1a" : "#9ca3af", boxShadow: activeTab === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {activeTab === "history" && history.length > 0 && (
+                      <button onClick={() => { bridge.clearHistory().then(() => showToast("History cleared")).catch(() => {}); }} style={{ padding: "6px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, fontFamily: F, backgroundColor: "transparent", color: "#9ca3af", transition: "color 0.15s" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#dc2626"}
+                        onMouseLeave={e => e.currentTarget.style.color = "#9ca3af"}>
+                        Clear
                       </button>
-                    ))}
+                    )}
                   </div>
                 </div>
                 <div style={{ padding: "10px 14px 14px", overflowY: "auto", flex: 1 }}>
-                  {activeTab === "history" && history.map((h, i) => (
-                    <div key={h.id} style={{ padding: "10px 12px", borderRadius: 14, marginBottom: 6, backgroundColor: "#fafaf8", cursor: "pointer", transition: "transform 0.15s", animation: `popIn 0.3s ease ${i * 0.03}s both` }}
+                  {activeTab === "history" && (history.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "32px 12px", color: "#9ca3af", fontSize: 12, fontFamily: F }}>No history yet. Read, write, or erase a tag to start.</div>
+                  ) : history.map((h, i) => (
+                    <div key={h.id} style={{ padding: "10px 12px", borderRadius: 14, marginBottom: 6, backgroundColor: "#fafaf8", cursor: "pointer", transition: "transform 0.15s", animation: `popIn 0.3s ease ${Math.min(i, 10) * 0.03}s both` }}
                       onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"}
                       onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
@@ -425,14 +430,32 @@ export default function NFCDashboard() {
                         </div>
                         <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: M }}>{formatTime(h.created_at)}</span>
                       </div>
-                      {h.label && <div style={{ fontSize: 12, color: "#1a1a1a", fontWeight: 500, marginBottom: 2 }}>{h.label}</div>}
+                      {editingLabelId === h.id ? (
+                        <input autoFocus value={labelDraft} onChange={e => setLabelDraft(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") { bridge.labelHistory(h.id, labelDraft || null).catch(() => {}); setEditingLabelId(null); } if (e.key === "Escape") setEditingLabelId(null); }}
+                          onBlur={() => { bridge.labelHistory(h.id, labelDraft || null).catch(() => {}); setEditingLabelId(null); }}
+                          style={{ width: "100%", padding: "4px 8px", fontSize: 12, fontFamily: F, border: "1px solid #10b981", borderRadius: 6, outline: "none", marginBottom: 2 }}
+                          placeholder="Add label..." />
+                      ) : (
+                        h.label && <div style={{ fontSize: 12, color: "#1a1a1a", fontWeight: 500, marginBottom: 2 }}>{h.label}</div>
+                      )}
                       <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: M, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{recordSummary(h.records)}</div>
                       <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                        <button onClick={e => { e.stopPropagation(); if (h.records?.[0]) setWriteRecord(JSON.parse(JSON.stringify(h.records[0]))); showToast("Loaded"); }} style={{ padding: "3px 8px", fontSize: 10, borderRadius: 6, border: "none", cursor: "pointer", backgroundColor: "#ecfdf5", color: "#059669", fontWeight: 600, fontFamily: F }}>Re-write</button>
-                        <button style={{ padding: "3px 8px", fontSize: 10, borderRadius: 6, border: "1px solid #e8e6e1", backgroundColor: "transparent", color: "#9ca3af", cursor: "pointer", fontWeight: 600, fontFamily: F }}>Label</button>
+                        {h.records?.length > 0 && (
+                          <button onClick={e => {
+                            e.stopPropagation();
+                            if (h.records[0]) setWriteRecord(JSON.parse(JSON.stringify(h.records[0])));
+                            if (tag && !opInProgress) {
+                              setTimeout(() => simulateOp("write", 1500), 100);
+                            } else {
+                              showToast("Place a tag to re-write");
+                            }
+                          }} style={{ padding: "3px 8px", fontSize: 10, borderRadius: 6, border: "none", cursor: "pointer", backgroundColor: "#ecfdf5", color: "#059669", fontWeight: 600, fontFamily: F }}>Re-write</button>
+                        )}
+                        <button onClick={e => { e.stopPropagation(); setEditingLabelId(h.id); setLabelDraft(h.label || ""); }} style={{ padding: "3px 8px", fontSize: 10, borderRadius: 6, border: "1px solid #e8e6e1", backgroundColor: "transparent", color: "#9ca3af", cursor: "pointer", fontWeight: 600, fontFamily: F }}>Label</button>
                       </div>
                     </div>
-                  ))}
+                  )))}
                   {activeTab === "templates" && (
                     <>
                       {templates.map((t, i) => (

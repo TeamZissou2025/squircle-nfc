@@ -1,6 +1,6 @@
 /**
  * React hook for connecting to the squircle-nfc-bridge WebSocket server.
- * Provides reactive state for bridge status, reader, and tag events.
+ * Provides reactive state for bridge status, reader, tag, and history events.
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 
@@ -19,6 +19,7 @@ export function useBridge(url = DEFAULT_URL) {
   const [tag, setTag] = useState(null);
   const [latency, setLatency] = useState(null);
   const [bridgeVersion, setBridgeVersion] = useState(null);
+  const [history, setHistory] = useState([]);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -29,6 +30,9 @@ export function useBridge(url = DEFAULT_URL) {
 
       ws.onopen = () => {
         setBridgeStatus("connected");
+        // Fetch existing history from bridge
+        const id = ++requestId.current;
+        ws.send(JSON.stringify({ id, action: "history" }));
       };
 
       ws.onmessage = (e) => {
@@ -79,6 +83,14 @@ export function useBridge(url = DEFAULT_URL) {
 
             case "tag:updated":
               setTag(msg);
+              break;
+
+            case "history:result":
+              if (msg.history) setHistory(msg.history);
+              break;
+
+            case "history:entry":
+              setHistory(prev => [msg, ...prev].slice(0, 100));
               break;
 
             case "heartbeat":
@@ -147,6 +159,10 @@ export function useBridge(url = DEFAULT_URL) {
   const writeTag = useCallback((records) => sendCommand("write", { records }), [sendCommand]);
   const eraseTag = useCallback(() => sendCommand("erase"), [sendCommand]);
   const lockTag = useCallback(() => sendCommand("lock"), [sendCommand]);
+  const clearHistory = useCallback(() => sendCommand("clearHistory").then(() => setHistory([])), [sendCommand]);
+  const labelHistory = useCallback((historyId, label) => sendCommand("labelHistory", { historyId, label }).then((msg) => {
+    setHistory(prev => prev.map(h => h.id === historyId ? { ...h, label: msg.label } : h));
+  }), [sendCommand]);
 
   return {
     bridgeStatus,
@@ -155,9 +171,12 @@ export function useBridge(url = DEFAULT_URL) {
     tag,
     latency,
     bridgeVersion,
+    history,
     readTag,
     writeTag,
     eraseTag,
     lockTag,
+    clearHistory,
+    labelHistory,
   };
 }

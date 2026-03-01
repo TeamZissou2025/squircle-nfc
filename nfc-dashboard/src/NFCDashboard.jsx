@@ -295,7 +295,7 @@ export default function NFCDashboard() {
 
   const [activeTab, setActiveTab] = useState("history");
   const [showLockModal, setShowLockModal] = useState(false);
-  const [writeRecords, setWriteRecords] = useState([{ type: "url", value: "" }]);
+  const [writeRecord, setWriteRecord] = useState({ type: "url", value: "" });
   const [history] = useState(MOCK_HISTORY);
   const [templates] = useState(STARTER_TEMPLATES);
   const [toast, setToast] = useState(null);
@@ -306,14 +306,13 @@ export default function NFCDashboard() {
   const simulateOp = useCallback((op, duration = 1200) => {
     setOpInProgress(op);
     if (bridge.bridgeStatus === "connected") {
-      const opFn = op === "read" ? bridge.readTag : op === "write" ? () => bridge.writeTag(writeRecords) : op === "erase" ? bridge.eraseTag : op === "lock" ? bridge.lockTag : null;
+      const opFn = op === "read" ? bridge.readTag : op === "write" ? () => bridge.writeTag([writeRecord]) : op === "erase" ? bridge.eraseTag : op === "lock" ? bridge.lockTag : null;
       if (opFn) { opFn().then(() => { setOpInProgress(null); showToast(op === "read" ? "Tag read" : op === "write" ? "Written!" : op === "erase" ? "Erased" : "Locked", "success"); }).catch((err) => { setOpInProgress(null); showToast(err.message, "error"); }); return; }
     }
     setTimeout(() => { setOpInProgress(null); showToast(op === "read" ? "Tag read" : op === "write" ? "Written!" : op === "erase" ? "Erased" : "Locked", "success"); }, duration);
-  }, [bridge, writeRecords, showToast]);
+  }, [bridge, writeRecord, showToast]);
 
-  const updateRecord = (i, rec) => setWriteRecords(writeRecords.map((r, idx) => idx === i ? rec : r));
-  const loadTemplate = (t) => { setWriteRecords(JSON.parse(JSON.stringify(t.records))); setActiveTab("history"); showToast(`Loaded "${t.name}"`); };
+  const loadTemplate = (t) => { setWriteRecord(JSON.parse(JSON.stringify(t.records[0]))); setActiveTab("history"); showToast(`Loaded "${t.name}"`); };
 
   useEffect(() => {
     const handler = (e) => {
@@ -429,7 +428,7 @@ export default function NFCDashboard() {
                       {h.label && <div style={{ fontSize: 12, color: "#1a1a1a", fontWeight: 500, marginBottom: 2 }}>{h.label}</div>}
                       <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: M, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{recordSummary(h.records)}</div>
                       <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                        <button onClick={e => { e.stopPropagation(); setWriteRecords(JSON.parse(JSON.stringify(h.records))); showToast("Loaded"); }} style={{ padding: "3px 8px", fontSize: 10, borderRadius: 6, border: "none", cursor: "pointer", backgroundColor: "#ecfdf5", color: "#059669", fontWeight: 600, fontFamily: F }}>Re-write</button>
+                        <button onClick={e => { e.stopPropagation(); if (h.records?.[0]) setWriteRecord(JSON.parse(JSON.stringify(h.records[0]))); showToast("Loaded"); }} style={{ padding: "3px 8px", fontSize: 10, borderRadius: 6, border: "none", cursor: "pointer", backgroundColor: "#ecfdf5", color: "#059669", fontWeight: 600, fontFamily: F }}>Re-write</button>
                         <button style={{ padding: "3px 8px", fontSize: 10, borderRadius: 6, border: "1px solid #e8e6e1", backgroundColor: "transparent", color: "#9ca3af", cursor: "pointer", fontWeight: 600, fontFamily: F }}>Label</button>
                       </div>
                     </div>
@@ -494,38 +493,25 @@ export default function NFCDashboard() {
                 {/* Write panel */}
                 <div style={{ ...card, padding: "18px 22px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1a" }}>Write Records</div>
-                    <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: M }}>~{Math.min(writeRecords.length * 40, tag.capacity)}/{tag.capacity}B</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1a" }}>Write Record</div>
                   </div>
-                  {writeRecords.map((rec, i) => (
-                    <div key={i} style={{ marginBottom: 14, position: "relative" }}>
-                      {writeRecords.length > 1 && (
-                        <button onClick={() => setWriteRecords(writeRecords.filter((_, idx) => idx !== i))} style={{ position: "absolute", top: 0, right: 0, width: 24, height: 24, borderRadius: 6, border: "1px solid #e8e6e1", backgroundColor: "#fff", color: "#9ca3af", cursor: "pointer", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}>
-                          <Icons.x size={12} />
-                        </button>
-                      )}
-                      {/* Type selector - single horizontal row */}
-                      <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "nowrap", overflowX: "auto" }}>
-                        {RECORD_TYPES.map(rt => (
-                          <button key={rt.id}
-                            onClick={() => updateRecord(i, { type: rt.id, value: ["vcard","wifi","geo","email","sms"].includes(rt.id) ? {} : "" })}
-                            style={{ padding: "6px 12px", borderRadius: 10, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap", transition: "all 0.15s", fontSize: 12, fontWeight: 600, fontFamily: F, flexShrink: 0, background: rec.type === rt.id ? "linear-gradient(135deg, #059669, #34d399)" : "#fafaf8", color: rec.type === rt.id ? "#fff" : "#6b7280" }}>
-                            {recordIcon(rt.id, 14)}{rt.label}
-                          </button>
-                        ))}
-                      </div>
-                      <RecordFields record={rec} onChange={r => updateRecord(i, r)} />
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-                    <button onClick={() => setWriteRecords([...writeRecords, { type: "url", value: "" }])} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1px dashed rgba(16,185,129,0.4)", backgroundColor: "transparent", color: "#059669", fontSize: 12, fontWeight: 600, fontFamily: F, cursor: "pointer" }}>+ Add Record</button>
-                    <button disabled={!tag || opInProgress !== null} onClick={() => simulateOp("write", 1500)}
-                      style={{ flex: 2, padding: "12px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg, #059669, #34d399)", color: "#fff", fontSize: 14, fontWeight: 700, fontFamily: F, opacity: !tag ? 0.5 : 1, boxShadow: "0 4px 16px rgba(16,185,129,0.3)", transition: "all 0.15s", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                      onMouseEnter={e => { if (tag && !opInProgress) { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 6px 24px rgba(16,185,129,0.4)"; }}}
-                      onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(16,185,129,0.3)"; }}>
-                      {opInProgress === "write" ? "Writing\u2026" : <><Icons.write size={16} /> Write to Tag</>}
-                    </button>
+                  {/* Type selector */}
+                  <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "nowrap", overflowX: "auto" }}>
+                    {RECORD_TYPES.map(rt => (
+                      <button key={rt.id}
+                        onClick={() => setWriteRecord({ type: rt.id, value: ["vcard","wifi","geo","email","sms"].includes(rt.id) ? {} : "" })}
+                        style={{ padding: "6px 12px", borderRadius: 10, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap", transition: "all 0.15s", fontSize: 12, fontWeight: 600, fontFamily: F, flexShrink: 0, background: writeRecord.type === rt.id ? "linear-gradient(135deg, #059669, #34d399)" : "#fafaf8", color: writeRecord.type === rt.id ? "#fff" : "#6b7280" }}>
+                        {recordIcon(rt.id, 14)}{rt.label}
+                      </button>
+                    ))}
                   </div>
+                  <RecordFields record={writeRecord} onChange={r => setWriteRecord(r)} />
+                  <button disabled={!tag || opInProgress !== null} onClick={() => simulateOp("write", 1500)}
+                    style={{ width: "100%", marginTop: 14, padding: "12px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg, #059669, #34d399)", color: "#fff", fontSize: 14, fontWeight: 700, fontFamily: F, opacity: !tag ? 0.5 : 1, boxShadow: "0 4px 16px rgba(16,185,129,0.3)", transition: "all 0.15s", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                    onMouseEnter={e => { if (tag && !opInProgress) { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 6px 24px rgba(16,185,129,0.4)"; }}}
+                    onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(16,185,129,0.3)"; }}>
+                    {opInProgress === "write" ? "Writing\u2026" : <><Icons.write size={16} /> Write to Tag</>}
+                  </button>
                 </div>
               </div>
             </div>

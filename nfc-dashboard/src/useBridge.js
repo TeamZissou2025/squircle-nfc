@@ -40,6 +40,8 @@ export function useBridge(url = DEFAULT_URL) {
           if (id && pendingRequests.current.has(id)) {
             const { resolve } = pendingRequests.current.get(id);
             pendingRequests.current.delete(id);
+            // Update tag state from write/erase/lock/read responses
+            if (msg.tag) setTag(msg.tag);
             resolve(msg);
           }
 

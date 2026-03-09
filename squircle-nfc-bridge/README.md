@@ -12,21 +12,24 @@ Local CLI tool that connects the ACR1252U NFC reader to the [Squircle NFC Dashbo
 
 ## Setup (fresh Mac)
 
-1. **Install Homebrew** (if you don't have it)
+1. **Open Terminal**
+   - Press `Cmd + Space`, type `Terminal`, and hit Enter
+
+2. **Install Homebrew** (if you don't have it)
    ```bash
    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
    ```
 
-2. **Install Node.js**
+3. **Install Node.js**
    ```bash
    brew install node
    ```
 
-3. **Install the ACS ACR1252U driver**
+4. **Install the ACS ACR1252U driver**
 
    Download and install from: https://www.acs.com.hk/en/driver/290/acr1252u-usb-nfc-reader-iii/
 
-4. **Clone the repo and install**
+5. **Clone the repo and install**
    ```bash
    git clone <repo-url>
    cd squircle-nfc/squircle-nfc-bridge
@@ -34,14 +37,14 @@ Local CLI tool that connects the ACR1252U NFC reader to the [Squircle NFC Dashbo
    npm link
    ```
 
-5. **Plug in the ACR1252U reader via USB**
+6. **Plug in the ACR1252U reader via USB**
 
-6. **Run the bridge**
+7. **Run the bridge**
    ```bash
    squircle-nfc-bridge
    ```
 
-7. **Open the dashboard** at https://nfc.moonagedaydream.ca
+8. **Open the dashboard** at https://nfc.moonagedaydream.ca
 
 ## Usage
 

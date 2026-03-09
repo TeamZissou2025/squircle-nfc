@@ -31,7 +31,7 @@ Local CLI tool that connects the ACR1252U NFC reader to the [Squircle NFC Dashbo
 
 5. **Clone the repo and install**
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/TeamZissou2025/squircle-nfc.git
    cd squircle-nfc/squircle-nfc-bridge
    npm install
    npm link
